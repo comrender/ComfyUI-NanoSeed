@@ -1,3 +1,5 @@
+from .nano_seed import NanoSeedEdit
+
 NODE_CLASS_MAPPINGS = {
     "NanoSeedEdit": NanoSeedEdit,
 }

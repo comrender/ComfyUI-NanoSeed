@@ -4,23 +4,30 @@ import base64
 import numpy as np
 from io import BytesIO
 from PIL import Image
-import os
 
-# Helper function to convert ComfyUI tensor (B, H, W, C) to PIL Image (single or first from batch)
+# Helper function to convert ComfyUI tensor (B=1, H, W, C) to PIL Image (RGB)
 def tensor2pil(image_tensor):
-    # Assume single image or take first from batch
-    if image_tensor.shape[0] > 1:
-        image_tensor = image_tensor[0:1]  # Process one at a time if batched here
-    i = 255. * image_tensor.cpu().numpy()
+    # image_tensor is always (1, H, W, C) from the loop
+    i = 255. * image_tensor[0].cpu().numpy()  # (H, W, C)
     image = np.clip(i, 0, 255).astype(np.uint8)
-    image = np.transpose(image[0], (1, 2, 0))  # HWC
-    return Image.fromarray(image)
+    
+    # Handle channels for PIL (always output RGB)
+    c = image.shape[-1]
+    if c == 1:
+        image = np.repeat(image, 3, axis=-1)  # (H, W, 3)
+    elif c == 3:
+        pass  # Already good
+    elif c == 4:
+        image = image[..., :3]  # Drop alpha
+    else:
+        raise ValueError(f"Unsupported channels: {c}. Expected 1, 3, or 4.")
+    
+    return Image.fromarray(image, mode='RGB')
 
-# Helper function to convert PIL Image back to ComfyUI tensor (B=1, H, W, C)
+# Helper function to convert PIL Image (RGB) back to ComfyUI tensor (B=1, H, W, C)
 def pil2tensor(pil_image):
-    arr = np.array(pil_image).astype(np.float32) / 255.0
-    arr = arr[np.newaxis, ...]  # Add batch dim
-    arr = np.transpose(arr, (0, 3, 1, 2))  # BHWC
+    arr = np.array(pil_image).astype(np.float32) / 255.0  # (H, W, 3)
+    arr = arr[np.newaxis, ...]  # (1, H, W, 3) - No transpose needed for BHWC
     return torch.from_numpy(arr)
 
 # Main node class
@@ -49,22 +56,26 @@ class NanoSeedEdit:
     OUTPUT_NODE = True
 
     def edit_image(self, image, prompt, model, fal_key, width=0, height=0, num_images=1, seed=0):
+        if fal_key == "your_fal_key_here":
+            raise ValueError("Please set your fal.ai API key in the node.")
+        
         batch_size = image.shape[0] if len(image.shape) == 4 else 1
         all_edited_tensors = []
 
         for b in range(batch_size):
             # Extract single image tensor from batch
-            single_image = image[b:b+1] if batch_size > 1 else image
+            single_image = image[b:b + 1] if batch_size > 1 else image
 
             # Convert to PIL
             pil_image = tensor2pil(single_image)
 
             # Handle custom resolution
             custom_size = (width > 0 and height > 0)
-            if custom_size and model == "nano_banana":
-                # For NanoBanana, resize input image
-                pil_image = pil_image.resize((width, height), Image.LANCZOS)
-            # For Seedream, resolution is handled in API payload
+            if custom_size:
+                if model == "nano_banana":
+                    # For NanoBanana, resize input image
+                    pil_image = pil_image.resize((width, height), Image.LANCZOS)
+                # For Seedream, resolution is handled in API payload
 
             # Encode to base64 data URI
             buffer = BytesIO()
@@ -87,8 +98,8 @@ class NanoSeedEdit:
                 payload = {
                     "prompt": prompt,
                     "image_urls": [img_data_uri],
-                    "num_images": num_images,
-                    "max_images": 1,  # Keep simple; can extend for more variations
+                    "num_images": 1,  # One generation
+                    "max_images": num_images,  # Variations per generation
                     "seed": seed,
                     "enable_safety_checker": True,
                     "sync_mode": True,
@@ -109,17 +120,24 @@ class NanoSeedEdit:
             if "images" not in api_result or len(api_result["images"]) == 0:
                 raise ValueError("No images returned from API")
 
-            # Download and convert each generated image
-            for img_info in api_result["images"][:num_images]:  # Limit to requested num
-                img_url = img_info.get("url")
-                if not img_url:
+            # Process each generated image (limit to num_images)
+            for img_info in api_result["images"][:num_images]:
+                # Handle data_uri (sync=True) or url
+                img_data = img_info.get("data_uri") or img_info.get("url")
+                if not img_data:
                     continue
 
-                img_resp = requests.get(img_url)
-                if img_resp.status_code != 200:
-                    raise ValueError("Failed to download generated image")
+                if img_data.startswith("data:"):
+                    # Parse base64 data URI
+                    header, encoded = img_data.split(",", 1)
+                    pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
+                else:
+                    # Download from URL
+                    img_resp = requests.get(img_data)
+                    if img_resp.status_code != 200:
+                        raise ValueError("Failed to download generated image")
+                    pil_edited = Image.open(BytesIO(img_resp.content))
 
-                pil_edited = Image.open(BytesIO(img_resp.content))
                 tensor_edited = pil2tensor(pil_edited)
                 all_edited_tensors.append(tensor_edited)
 
@@ -127,8 +145,7 @@ class NanoSeedEdit:
         if all_edited_tensors:
             batched_output = torch.cat(all_edited_tensors, dim=0)
         else:
-            batched_output = torch.empty((1, 1, 1, 3))  # Fallback empty
+            # Fallback: empty batch of 1 dummy image
+            batched_output = torch.zeros((1, 512, 512, 3))
 
         return (batched_output,)
-
-# For batch processing in workflows, ComfyUI handles it via the IMAGE type
