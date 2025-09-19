@@ -3,9 +3,13 @@
 A custom ComfyUI node for seamless image editing using fal.ai's NanoBanana and Seedream (v4) models. Edit images with AI-powered prompts, supporting multi-image batches, custom resolutions, and easy fal.ai API key integration directly in the node interface.
 <img width="958" height="452" alt="image" src="https://github.com/user-attachments/assets/3e773be5-cb7b-4767-bb0e-f0ccc7a6f5d2" />
 
+## Updates
+
+- **19092025 Multi Model Support**: added support for Flux Kontext Pro.
+
 ## Features
 
-- **Dual Model Support**: Switch between NanoBanana for fast, lightweight edits and Seedream for high-fidelity variations.
+- **Multi Model Support**: Switch between NanoBanana, Seedream, or Flux Kontext Pro.
 - **Batch Processing**: Handle multiple input images in one go.
 - **Flexible Inputs**: Custom width/height, number of outputs (up to 4), and seed control.
 - **User-Friendly**: No hardcoding—enter your fal.ai key right in ComfyUI.
@@ -54,6 +58,7 @@ This node uses the fal.ai endpoints:
 
 - [NanoBanana Edit](https://fal.ai/models/fal-ai/nano-banana/edit/api)
 - [Seedream v4 Edit](https://fal.ai/models/fal-ai/bytedance/seedream/v4/edit/api)
+- [Flux Kontext Pro](https://fal.ai/models/fal-ai/flux-pro/kontext/api)
 
 Images are encoded as base64 PNGs for upload. Sync mode ensures immediate results.
 
