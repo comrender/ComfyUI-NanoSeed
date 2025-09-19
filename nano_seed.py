@@ -38,7 +38,7 @@ class NanoSeedEdit:
             "required": {
                 "image": ("IMAGE",),  # Supports batch/multi-image input
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "seedream"],),
+                "model": (["nano_banana", "seedream", "flux_kontext_pro"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -75,7 +75,7 @@ class NanoSeedEdit:
                 if model == "nano_banana":
                     # For NanoBanana, resize input image
                     pil_image = pil_image.resize((width, height), Image.LANCZOS)
-                # For Seedream, resolution is handled in API payload
+                # For Seedream and Flux Kontext Pro, resolution is handled in API payload
 
             # Encode to base64 data URI
             buffer = BytesIO()
@@ -103,6 +103,20 @@ class NanoSeedEdit:
                     "seed": seed,
                     "enable_safety_checker": True,
                     "sync_mode": True,
+                }
+                if custom_size:
+                    payload["image_size"] = {"width": width, "height": height}
+            elif model == "flux_kontext_pro":
+                url = "https://fal.run/fal-ai/flux-pro/kontext"
+                payload = {
+                    "prompt": prompt,
+                    "image_url": img_data_uri,  # Singular for Flux Kontext Pro
+                    "num_images": num_images,
+                    "seed": seed,
+                    "output_format": "png",
+                    "sync_mode": True,
+                    "guidance_scale": 3.5,  # Default
+                    "safety_tolerance": "2",  # Default
                 }
                 if custom_size:
                     payload["image_size"] = {"width": width, "height": height}
