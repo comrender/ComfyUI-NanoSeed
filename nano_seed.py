@@ -42,8 +42,8 @@ class NanoSeedEdit:
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
-                "width": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 64, "display": "number"}),
-                "height": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 64, "display": "number"}),
+                "width": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
+                "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
             }
@@ -60,100 +60,102 @@ class NanoSeedEdit:
             raise ValueError("Please set your fal.ai API key in the node.")
         
         batch_size = image.shape[0] if len(image.shape) == 4 else 1
-        all_edited_tensors = []
-
+        # Limit to 10 for Seedream compatibility; Nano may allow more, but safe
+        batch_size = min(batch_size, 10)
+        
+        img_data_uris = []
+        custom_size = (width > 0 and height > 0)
+        
         for b in range(batch_size):
-            # Extract single image tensor from batch
             single_image = image[b:b + 1] if batch_size > 1 else image
-
-            # Convert to PIL
             pil_image = tensor2pil(single_image)
-
-            # Handle custom resolution
-            custom_size = (width > 0 and height > 0)
-            if custom_size:
-                if model == "nano_banana":
-                    # For NanoBanana, resize input image
-                    pil_image = pil_image.resize((width, height), Image.LANCZOS)
-                # For Seedream and Flux Kontext Pro, resolution is handled in API payload
-
+            
+            if custom_size and model == "nano_banana":
+                # Resize each input for NanoBanana
+                pil_image = pil_image.resize((width, height), Image.LANCZOS)
+            
             # Encode to base64 data URI
             buffer = BytesIO()
             pil_image.save(buffer, format="PNG")
             img_str = base64.b64encode(buffer.getvalue()).decode()
-            img_data_uri = f"data:image/png;base64,{img_str}"
-
-            # Prepare API endpoint and payload
-            if model == "nano_banana":
-                url = "https://fal.run/fal-ai/nano-banana/edit"
-                payload = {
-                    "prompt": prompt,
-                    "image_urls": [img_data_uri],
-                    "num_images": num_images,
-                    "output_format": "png",
-                    "sync_mode": True,
-                }
-            elif model == "seedream":
-                url = "https://fal.run/fal-ai/bytedance/seedream/v4/edit"
-                payload = {
-                    "prompt": prompt,
-                    "image_urls": [img_data_uri],
-                    "num_images": 1,  # One generation
-                    "max_images": num_images,  # Variations per generation
-                    "seed": seed,
-                    "enable_safety_checker": True,
-                    "sync_mode": True,
-                }
-                if custom_size:
-                    payload["image_size"] = {"width": width, "height": height}
-            elif model == "flux_kontext_pro":
-                url = "https://fal.run/fal-ai/flux-pro/kontext"
-                payload = {
-                    "prompt": prompt,
-                    "image_url": img_data_uri,  # Singular for Flux Kontext Pro
-                    "num_images": num_images,
-                    "seed": seed,
-                    "output_format": "png",
-                    "sync_mode": True,
-                    "guidance_scale": 3.5,  # Default
-                    "safety_tolerance": "2",  # Default
-                }
-                if custom_size:
-                    payload["image_size"] = {"width": width, "height": height}
-
-            # Make API call
-            headers = {
-                "Authorization": f"Key {fal_key}",
-                "Content-Type": "application/json",
+            img_data_uris.append(f"data:image/png;base64,{img_str}")
+        
+        if model == "flux_kontext_pro" and len(img_data_uris) > 1:
+            raise ValueError("Flux Kontext Pro supports only a single input image. Use one image or select another model.")
+        
+        # Prepare API endpoint and payload
+        if model == "nano_banana":
+            url = "https://fal.run/fal-ai/nano-banana/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,  # Multiple supported
+                "num_images": num_images,
+                "output_format": "png",
+                "sync_mode": True,
             }
-            response = requests.post(url, json=payload, headers=headers)
-            if response.status_code != 200:
-                raise ValueError(f"API error: {response.text}")
+        elif model == "seedream":
+            url = "https://fal.run/fal-ai/bytedance/seedream/v4/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,  # Multiple supported (up to 10)
+                "num_images": 1,  # One generation
+                "max_images": num_images,  # Variations
+                "seed": seed,
+                "enable_safety_checker": True,
+                "sync_mode": True,
+            }
+            if custom_size:
+                payload["image_size"] = {"width": width, "height": height}
+        elif model == "flux_kontext_pro":
+            url = "https://fal.run/fal-ai/flux-pro/kontext"
+            payload = {
+                "prompt": prompt,
+                "image_url": img_data_uris[0],  # Single
+                "num_images": num_images,
+                "seed": seed,
+                "output_format": "png",
+                "sync_mode": True,
+                "guidance_scale": 3.5,  # Default
+                "safety_tolerance": "2",  # Default
+            }
+            if custom_size:
+                payload["image_size"] = {"width": width, "height": height}
 
-            api_result = response.json()
-            if "images" not in api_result or len(api_result["images"]) == 0:
-                raise ValueError("No images returned from API")
+        # Make API call
+        headers = {
+            "Authorization": f"Key {fal_key}",
+            "Content-Type": "application/json",
+        }
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code != 200:
+            raise ValueError(f"API error: {response.text}")
 
-            # Process each generated image (limit to num_images)
-            for img_info in api_result["images"][:num_images]:
-                # Handle data_uri (sync=True) or url
-                img_data = img_info.get("data_uri") or img_info.get("url")
-                if not img_data:
-                    continue
+        api_result = response.json()
+        if "images" not in api_result or len(api_result["images"]) == 0:
+            raise ValueError("No images returned from API")
 
-                if img_data.startswith("data:"):
-                    # Parse base64 data URI
-                    header, encoded = img_data.split(",", 1)
-                    pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
-                else:
-                    # Download from URL
-                    img_resp = requests.get(img_data)
-                    if img_resp.status_code != 200:
-                        raise ValueError("Failed to download generated image")
-                    pil_edited = Image.open(BytesIO(img_resp.content))
+        all_edited_tensors = []
 
-                tensor_edited = pil2tensor(pil_edited)
-                all_edited_tensors.append(tensor_edited)
+        # Process each generated image (limit to num_images)
+        for img_info in api_result["images"][:num_images]:
+            # Handle data_uri (sync=True) or url
+            img_data = img_info.get("data_uri") or img_info.get("url")
+            if not img_data:
+                continue
+
+            if img_data.startswith("data:"):
+                # Parse base64 data URI
+                header, encoded = img_data.split(",", 1)
+                pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
+            else:
+                # Download from URL
+                img_resp = requests.get(img_data)
+                if img_resp.status_code != 200:
+                    raise ValueError("Failed to download generated image")
+                pil_edited = Image.open(BytesIO(img_resp.content))
+
+            tensor_edited = pil2tensor(pil_edited)
+            all_edited_tensors.append(tensor_edited)
 
         # Stack all edited tensors into a batch
         if all_edited_tensors:
