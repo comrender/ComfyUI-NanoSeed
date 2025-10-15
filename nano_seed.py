@@ -38,7 +38,7 @@ class NanoSeedEdit:
             "required": {
                 "image": ("IMAGE",),  # Supports batch/multi-image input
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "seedream", "flux_kontext_pro"],),
+                "model": (["nano_banana", "seedream", "flux_kontext_pro", "qwen_edit_plus"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -60,8 +60,8 @@ class NanoSeedEdit:
             raise ValueError("Please set your fal.ai API key in the node.")
         
         batch_size = image.shape[0] if len(image.shape) == 4 else 1
-        # Limit to 10 for Seedream compatibility; Nano may allow more, but safe
-        batch_size = min(batch_size, 10)
+        # Limit to 5 images max for multi-support models
+        batch_size = min(batch_size, 5)
         
         img_data_uris = []
         custom_size = (width > 0 and height > 0)
@@ -117,6 +117,22 @@ class NanoSeedEdit:
                 "sync_mode": True,
                 "guidance_scale": 3.5,  # Default
                 "safety_tolerance": "2",  # Default
+            }
+            if custom_size:
+                payload["image_size"] = {"width": width, "height": height}
+        elif model == "qwen_edit_plus":
+            url = "https://fal.run/fal-ai/qwen-image-edit-plus"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,  # Multiple supported
+                "num_images": num_images,
+                "seed": seed,
+                "guidance_scale": 4.0,
+                "num_inference_steps": 50,
+                "enable_safety_checker": True,
+                "output_format": "png",
+                "sync_mode": True,
+                "acceleration": "regular",
             }
             if custom_size:
                 payload["image_size"] = {"width": width, "height": height}
