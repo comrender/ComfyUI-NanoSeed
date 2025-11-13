@@ -5,7 +5,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NanoSeedEdit": "Edit image NanoBanana + Seededit by ComRender"
+    "NanoSeedEdit": "NanoSeed"
 }
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
