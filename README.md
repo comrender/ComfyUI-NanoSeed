@@ -59,7 +59,7 @@ This node uses the fal.ai endpoints:
 - [NanoBanana Edit](https://fal.ai/models/fal-ai/nano-banana/edit/api)
 - [Seedream v4 Edit](https://fal.ai/models/fal-ai/bytedance/seedream/v4/edit/api)
 - [Flux Kontext Pro](https://fal.ai/models/fal-ai/flux-pro/kontext/api)
-
+- Qwen Edit Plus
 Images are encoded as base64 PNGs for upload. Sync mode ensures immediate results.
 
 ## Troubleshooting
