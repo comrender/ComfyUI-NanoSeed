@@ -29,7 +29,7 @@ Documentation = "https://github.com/comrender/ComfyUI-NanoSeed/wiki"
 "Bug Tracker" = "https://github.com/comrender/ComfyUI-NanoSeed/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "comrender"
 DisplayName = "ComfyUI-NanoSeed"
 Icon = ""
 includes = [] 
