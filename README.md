@@ -9,6 +9,7 @@ A custom ComfyUI node for seamless image editing using fal.ai's NanoBanana and S
 
 ## Features
 
+- **Nano Banana Pro Support**: added support of new Nano Banana Pro model as well as new parameters.
 - **Multi Model Support**: Switch between NanoBanana, Seedream, or Flux Kontext Pro.
 - **Batch Processing**: Handle multiple input images in one go.
 - **Flexible Inputs**: Custom width/height, number of outputs (up to 4), and seed control.
