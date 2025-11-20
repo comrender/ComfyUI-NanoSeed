@@ -39,7 +39,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "seedream", "flux_kontext_pro", "qwen_edit_plus"],),
+                "model": (["nano_banana", "nano_banana_pro", "seedream", "flux_kontext_pro", "qwen_edit_plus"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -52,6 +52,8 @@ class NanoSeedEdit:
                 "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
+                "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16"], {"default": "auto"}),
+                "resolution": (["1K", "2K", "4K"], {"default": "1K"}),
             }
         }
 
@@ -62,7 +64,7 @@ class NanoSeedEdit:
     OUTPUT_NODE = True
 
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
-                   width=0, height=0, num_images=1, seed=0):
+                   width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K"):
         if fal_key == "your_fal_key_here":
             raise ValueError("Please set your fal.ai API key in the node.")
         
@@ -80,7 +82,7 @@ class NanoSeedEdit:
             if pil_image is None:
                 continue
             
-            if custom_size and model == "nano_banana":
+            if custom_size and model in ["nano_banana", "nano_banana_pro"]:
                 pil_image = pil_image.resize((width, height), Image.LANCZOS)
             
             buffer = BytesIO()
@@ -99,6 +101,17 @@ class NanoSeedEdit:
                 "prompt": prompt,
                 "image_urls": img_data_uris,
                 "num_images": num_images,
+                "output_format": "png",
+                "sync_mode": True,
+            }
+        elif model == "nano_banana_pro":
+            url = "https://fal.run/fal-ai/nano-banana-pro/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,
+                "num_images": num_images,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
                 "output_format": "png",
                 "sync_mode": True,
             }
