@@ -3,11 +3,7 @@
 A custom ComfyUI node for seamless image editing using fal.ai's NanoBanana and Seedream (v4) models. Edit images with AI-powered prompts, supporting multi-image batches, custom resolutions, and easy fal.ai API key integration directly in the node interface.
 <img width="958" height="452" alt="image" src="https://github.com/user-attachments/assets/3e773be5-cb7b-4767-bb0e-f0ccc7a6f5d2" />
 
-## Updates
-- **15112025 Multi Image Inputs**: added support for direct multiple image input without using extra image batch nodes.
-- **19092025 Multi Model Support**: added support for Flux Kontext Pro and Qwen Edit Plus.
-
-## Features
+## Features & Updates
 
 - **Nano Banana Pro Support**: added support of new Nano Banana Pro model as well as new parameters.
 - **Multi Model Support**: Switch between NanoBanana, Seedream, or Flux Kontext Pro.
