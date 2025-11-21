@@ -1,7 +1,8 @@
 # ComfyUI-NanoSeed
 
 A custom ComfyUI node for seamless image editing using fal.ai's NanoBanana and Seedream (v4) models. Edit images with AI-powered prompts, supporting multi-image batches, custom resolutions, and easy fal.ai API key integration directly in the node interface.
-<img width="958" height="452" alt="image" src="https://github.com/user-attachments/assets/3e773be5-cb7b-4767-bb0e-f0ccc7a6f5d2" />
+<img width="925" height="464" alt="image" src="https://github.com/user-attachments/assets/e8cce9fc-dacb-4027-a1cf-4e29ace68329" />
+
 
 ## Features & Updates
 
