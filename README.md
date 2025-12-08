@@ -2,7 +2,7 @@
 
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![Fal.ai](https://img.shields.io/badge/Backend-Fal.ai-purple)
 
-A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing APIs. This node allows you to edit images using natural language prompts via state-of-the-art models like Flux2, Qwen, Seedream, and Nano Banana.
+A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing APIs. This node allows you to edit images using natural language prompts via state-of-the-art models like Flux2 (standard, Pro, Flex), Qwen, Seedream 4.5, and Nano Banana 1/Pro.
 <img width="925" height="464" alt="image" src="https://github.com/user-attachments/assets/e8cce9fc-dacb-4027-a1cf-4e29ace68329" />
 ## ✨ Features
 
@@ -19,7 +19,7 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 | **Nano Banana Pro** | `nano_banana_pro` | Enhanced quality version of Nano Banana. |
 | **Seedream 4.5** | `seedream_4.5` | ByteDance's model. Optimized for high-res editing. |
 | **Qwen Edit Plus** | `qwen_edit_plus` | Powerful instruction-based editing with guidance control. |
-| **Flux 2 Edit** | `flux_2_edit` | (BFL) High-fidelity editing capabilities. |
+| **Flux 2 (Standard, Pro, Flex)** | `flux_2_edit` | (BFL) High-fidelity editing capabilities. |
 
 ## 📦 Installation
 
