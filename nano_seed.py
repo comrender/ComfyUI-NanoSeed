@@ -39,7 +39,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "seedream_4.5", "qwen_edit_plus", "flux_2_edit"],),
+                "model": (["nano_banana", "nano_banana_pro", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -83,10 +83,12 @@ class NanoSeedEdit:
             if pil_image is None:
                 continue
             
-            # Resize if custom size (model-specific)
+            # Resize if custom size (model-specific behavior)
+            # For Flux and Qwen, we usually send image_size in payload, but resizing here 
+            # ensures consistent aspect ratio calculation before sending if needed.
+            # Nano models ignore this as per original code.
             if custom_size:
                 if model in ["nano_banana", "nano_banana_pro"]:
-                    # Nano models don't support custom size; ignore and use aspect/resolution
                     pass
                 else:
                     pil_image = pil_image.resize((width, height), Image.LANCZOS)
@@ -96,9 +98,7 @@ class NanoSeedEdit:
             img_str = base64.b64encode(buffer.getvalue()).decode()
             img_data_uris.append(f"data:image/png;base64,{img_str}")
         
-        # Enforce limits
-        if model == "flux_2_edit" and len(img_data_uris) > 1:
-            raise ValueError("Flux 2 Edit supports only a single input image. Use only image1.")
+        # Enforce limits (Updated: Removed Flux 2 single image limit)
         if model == "seedream_4.5" and len(img_data_uris) + num_images > 15:
             raise ValueError("Seedream 4.5: Total inputs + outputs must <=15.")
         
@@ -157,11 +157,19 @@ class NanoSeedEdit:
             }
             if custom_size:
                 payload["image_size"] = {"width": width, "height": height}
-        elif model == "flux_2_edit":
-            url = "https://fal.run/fal-ai/flux-2/edit"
+        
+        # Combined logic for Flux 2 Edit, Pro, and Flex
+        elif model in ["flux_2_edit", "flux_2_pro", "flux_2_flex"]:
+            if model == "flux_2_edit":
+                url = "https://fal.run/fal-ai/flux-2/edit"
+            elif model == "flux_2_pro":
+                url = "https://fal.run/fal-ai/flux-2-pro/edit"
+            elif model == "flux_2_flex":
+                url = "https://fal.run/fal-ai/flux-2-flex/edit"
+
             payload = {
                 "prompt": prompt,
-                "image_urls": img_data_uris[:1],  # Single image
+                "image_urls": img_data_uris, # Sends all connected images
                 "num_images": min(num_images, 4),
                 "seed": seed,
                 "guidance_scale": 2.5,
@@ -172,9 +180,13 @@ class NanoSeedEdit:
                 "sync_mode": True,
                 "acceleration": acceleration,
             }
+            
             if custom_size:
-                if not (512 <= width <= 2048 and 512 <= height <= 2048):
-                    raise ValueError("Flux 2: Size must be 512-2048px.")
+                # Standard validation for Flux Edit, relaxed for Pro/Flex as they might handle more
+                if model == "flux_2_edit":
+                    if not (512 <= width <= 2048 and 512 <= height <= 2048):
+                        raise ValueError("Flux 2 Edit: Size must be 512-2048px.")
+                
                 payload["image_size"] = {"width": width, "height": height}
 
         # API call
@@ -215,6 +227,7 @@ class NanoSeedEdit:
         if all_edited_tensors:
             batched_output = torch.cat(all_edited_tensors, dim=0)
         else:
+            # Fallback (should be covered by error check above)
             batched_output = torch.zeros((1, 512, 512, 3))
 
         return (batched_output,)
