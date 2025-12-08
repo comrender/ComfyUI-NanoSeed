@@ -39,7 +39,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "seedream", "flux_kontext_pro", "qwen_edit_plus"],),
+                "model": (["nano_banana", "nano_banana_pro", "seedream_4.5", "qwen_edit_plus", "flux_2_edit"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -50,7 +50,7 @@ class NanoSeedEdit:
                 "image5": ("IMAGE",),
                 "width": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
-                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 6}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
                 "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16"], {"default": "auto"}),
                 "resolution": (["1K", "2K", "4K"], {"default": "1K"}),
@@ -64,7 +64,8 @@ class NanoSeedEdit:
     OUTPUT_NODE = True
 
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
-                   width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K"):
+                   width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K",
+                   acceleration="none"):  # Hardcoded to none, kept for compatibility
         if fal_key == "your_fal_key_here":
             raise ValueError("Please set your fal.ai API key in the node.")
         
@@ -82,25 +83,33 @@ class NanoSeedEdit:
             if pil_image is None:
                 continue
             
-            if custom_size and model in ["nano_banana", "nano_banana_pro"]:
-                pil_image = pil_image.resize((width, height), Image.LANCZOS)
+            # Resize if custom size (model-specific)
+            if custom_size:
+                if model in ["nano_banana", "nano_banana_pro"]:
+                    # Nano models don't support custom size; ignore and use aspect/resolution
+                    pass
+                else:
+                    pil_image = pil_image.resize((width, height), Image.LANCZOS)
             
             buffer = BytesIO()
             pil_image.save(buffer, format="PNG")
             img_str = base64.b64encode(buffer.getvalue()).decode()
             img_data_uris.append(f"data:image/png;base64,{img_str}")
         
-        # Enforce single image for Flux Kontext Pro
-        if model == "flux_kontext_pro" and len(img_data_uris) > 1:
-            raise ValueError("Flux Kontext Pro supports only a single input image. Use only image1.")
+        # Enforce limits
+        if model == "flux_2_edit" and len(img_data_uris) > 1:
+            raise ValueError("Flux 2 Edit supports only a single input image. Use only image1.")
+        if model == "seedream_4.5" and len(img_data_uris) + num_images > 15:
+            raise ValueError("Seedream 4.5: Total inputs + outputs must <=15.")
         
-        # Prepare payload based on model
+        # Model-specific payloads
         if model == "nano_banana":
             url = "https://fal.run/fal-ai/nano-banana/edit"
             payload = {
                 "prompt": prompt,
                 "image_urls": img_data_uris,
-                "num_images": num_images,
+                "num_images": min(num_images, 4),
+                "aspect_ratio": aspect_ratio,
                 "output_format": "png",
                 "sync_mode": True,
             }
@@ -109,54 +118,63 @@ class NanoSeedEdit:
             payload = {
                 "prompt": prompt,
                 "image_urls": img_data_uris,
-                "num_images": num_images,
+                "num_images": min(num_images, 4),
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
                 "output_format": "png",
                 "sync_mode": True,
             }
-        elif model == "seedream":
-            url = "https://fal.run/fal-ai/bytedance/seedream/v4/edit"
+        elif model == "seedream_4.5":
+            url = "https://fal.run/fal-ai/bytedance/seedream/v4.5/edit"
             payload = {
                 "prompt": prompt,
                 "image_urls": img_data_uris,
-                "num_images": 1,
-                "max_images": num_images,
+                "num_images": min(num_images, 6),
                 "seed": seed,
                 "enable_safety_checker": True,
                 "sync_mode": True,
             }
             if custom_size:
-                payload["image_size"] = {"width": width, "height": height}
-        elif model == "flux_kontext_pro":
-            url = "https://fal.run/fal-ai/flux-pro/kontext"
-            payload = {
-                "prompt": prompt,
-                "image_url": img_data_uris[0],
-                "num_images": num_images,
-                "seed": seed,
-                "output_format": "png",
-                "sync_mode": True,
-                "guidance_scale": 3.5,
-                "safety_tolerance": "2",
-            }
-            if custom_size:
+                if not (1920 <= width <= 4096 and 1920 <= height <= 4096):
+                    raise ValueError("Seedream 4.5: Width/height must be 1920-4096px.")
+                area = width * height
+                if not (3686400 <= area <= 16777216):
+                    raise ValueError(f"Seedream 4.5: Image area must be 3,686,400-16,777,216px. Got {area}.")
                 payload["image_size"] = {"width": width, "height": height}
         elif model == "qwen_edit_plus":
             url = "https://fal.run/fal-ai/qwen-image-edit-plus"
             payload = {
                 "prompt": prompt,
                 "image_urls": img_data_uris,
-                "num_images": num_images,
+                "num_images": min(num_images, 4),
                 "seed": seed,
                 "guidance_scale": 4.0,
                 "num_inference_steps": 50,
                 "enable_safety_checker": True,
                 "output_format": "png",
                 "sync_mode": True,
-                "acceleration": "regular",
+                "acceleration": acceleration,
             }
             if custom_size:
+                payload["image_size"] = {"width": width, "height": height}
+        elif model == "flux_2_edit":
+            url = "https://fal.run/fal-ai/flux-2/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris[:1],  # Single image
+                "num_images": min(num_images, 4),
+                "seed": seed,
+                "guidance_scale": 2.5,
+                "num_inference_steps": 28,
+                "enable_prompt_expansion": False,
+                "enable_safety_checker": True,
+                "output_format": "png",
+                "sync_mode": True,
+                "acceleration": acceleration,
+            }
+            if custom_size:
+                if not (512 <= width <= 2048 and 512 <= height <= 2048):
+                    raise ValueError("Flux 2: Size must be 512-2048px.")
                 payload["image_size"] = {"width": width, "height": height}
 
         # API call
