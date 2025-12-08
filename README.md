@@ -1,87 +1,83 @@
-# ComfyUI-NanoSeed
+# ComfyUI NanoSeed Edit
 
-A custom ComfyUI node for seamless image editing using fal.ai's NanoBanana and Seedream (v4) models. Edit images with AI-powered prompts, supporting multi-image batches, custom resolutions, and easy fal.ai API key integration directly in the node interface.
+![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![Fal.ai](https://img.shields.io/badge/Backend-Fal.ai-purple)
+
+A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing APIs. This node allows you to edit images using natural language prompts via state-of-the-art models like Flux2, Qwen, Seedream, and Nano Banana.
 <img width="925" height="464" alt="image" src="https://github.com/user-attachments/assets/e8cce9fc-dacb-4027-a1cf-4e29ace68329" />
+## ✨ Features
 
+* **Multi-Model Support:** Access multiple editing models from a single node.
+* **Multi-Image Input:** Support for up to 5 input images for context-aware editing (model dependent).
+* **Flexible Output:** Control aspect ratios, resolution, and batch size.
+* **Cloud Inference:** Offloads heavy GPU processing to Fal.ai's cloud infrastructure.
 
-## Features & Updates
+## 🚀 Supported Models
 
-- **Nano Banana Pro Support**: added support of new Nano Banana Pro model as well as new parameters.
-- **Multi Model Support**: Switch between NanoBanana, Seedream, or Flux Kontext Pro.
-- **Batch Processing**: Handle multiple input images in one go.
-- **Flexible Inputs**: Custom width/height, number of outputs (up to 4), and seed control.
-- **User-Friendly**: No hardcoding—enter your fal.ai key right in ComfyUI.
+| Model | ID in Node | Description |
+| :--- | :--- | :--- |
+| **Nano Banana** | `nano_banana` | Fast, efficient editing. |
+| **Nano Banana Pro** | `nano_banana_pro` | Enhanced quality version of Nano Banana. |
+| **Seedream 4.5** | `seedream_4.5` | ByteDance's model. Optimized for high-res editing. |
+| **Qwen Edit Plus** | `qwen_edit_plus` | Powerful instruction-based editing with guidance control. |
+| **Flux 2 Edit** | `flux_2_edit` | (BFL) High-fidelity editing capabilities. |
 
-## Installation
+## 📦 Installation
 
-1. Clone this repo into `ComfyUI/custom_nodes/`.
+1.  Navigate to your ComfyUI `custom_nodes` directory:
+    ```bash
+    cd /path/to/ComfyUI/custom_nodes/
+    ```
+2.  Clone this repository (or unzip the folder containing these files):
+    ```bash
+    git clone [https://github.com/yourusername/ComfyUI-NanoSeed.git](https://github.com/yourusername/ComfyUI-NanoSeed.git)
+    ```
+3.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-   ```bash
-   git clone https://github.com/yourusername/ComfyUI-NanoSeed.git
-   ```
+## 🔑 Configuration
 
-2. Install dependencies: `pip install -r requirements.txt`.
+You must have a **Fal.ai API Key** to use this node.
 
-3. Restart ComfyUI and find the node under **image/edit** as "Edit image NanoBanana + Seededit by ComRender".
+1.  Go to [fal.ai](https://fal.ai/dashboard/keys) and generate an API Key.
+2.  Enter this key into the `fal_key` widget on the node.
 
-Get your fal.ai API key at [fal.ai](https://fal.ai) and drop it into the node for instant edits!
+## 🎛️ Usage
 
-## Usage
+### Inputs
+* **prompt**: (Required) A text description of how to edit the image.
+* **model**: Select the specific AI model to use.
+* **fal_key**: Your API key.
+* **image1 - image5**: Connect the images you want to edit.
 
-### Node Inputs
+### Settings
+* **width / height**: Output resolution.
+    * *Note:* `nano_banana` models ignore this and use `aspect_ratio`.
+    * *Note:* `seedream_4.5` requires high resolutions (see constraints below).
+* **num_images**: How many variations to generate (Max 6).
+* **seed**: Seed for reproducibility.
+* **aspect_ratio**: Set target aspect ratio (e.g., 16:9, 1:1).
 
-- **image** (IMAGE): Input image tensor (supports batches).
-- **prompt** (STRING): Descriptive prompt for editing the image.
-- **model** (COMBO): Select "nano_banana" or "seedream".
-- **fal_key** (STRING): Your fal.ai API key.
-- **width/height** (INT, optional): Custom output resolution (0 to use input size).
-- **num_images** (INT, optional): Number of variations to generate (1-4).
-- **seed** (INT, optional): Random seed for reproducibility.
+### ⚠️ Model Specific Constraints
 
-### Outputs
+Different models have different requirements implemented in the node:
 
-- **edited_image** (IMAGE): Batch of edited image tensors.
+1.  **Flux 2 Edit (`flux_2_edit`)**:
+    * **Single Image Only:** Do not connect `image2` through `image5`.
+    * **Resolution:** Width and Height must be between **512px and 2048px**.
 
-### Example Workflow
+2.  **Seedream 4.5 (`seedream_4.5`)**:
+    * **High Res Only:** Width and Height must be between **1920px and 4096px**.
+    * **Pixel Count:** Total pixels (W x H) must be between ~3.6MP and 16.7MP.
+    * **Batch Limit:** The sum of input images and output `num_images` cannot exceed 15.
 
-1. Load an image using `Load Image`.
-2. Connect to `NanoSeedEdit`.
-3. Set prompt: "Add a cyberpunk neon glow to the cityscape".
-4. Select model and enter your API key.
-5. Queue prompt—outputs will be ready for preview or further nodes.
+3.  **Nano Banana / Pro**:
+    * These models rely on `aspect_ratio` and `resolution` (1K/2K/4K) settings rather than custom width/height integers.
 
-## API Details
+## 🛠️ Troubleshooting
 
-This node uses the fal.ai endpoints:
-
-- [NanoBanana Edit](https://fal.ai/models/fal-ai/nano-banana/edit/api)
-- [Seedream v4 Edit](https://fal.ai/models/fal-ai/bytedance/seedream/v4/edit/api)
-- [Flux Kontext Pro](https://fal.ai/models/fal-ai/flux-pro/kontext/api)
-- Qwen Edit Plus
-Images are encoded as base64 PNGs for upload. Sync mode ensures immediate results.
-
-## Troubleshooting
-
-- **API Errors**: Check your fal.ai key and quota. Ensure internet access.
-- **Resolution Issues**: For NanoBanana, custom sizes resize the input; for Seedream, they set output dims.
-- **Batch Limits**: ComfyUI handles batches, but API calls are per-image to avoid rate limits.
-- **Dependencies**: Only `requests` is required; no Torch extras needed.
-
-If issues persist, open a GitHub issue with logs.
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Author
-
-ComRender
-
-## Built With
-
-- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-- [fal.ai APIs](https://fal.ai)
-
----
+* **"No images returned from API"**: Check your `fal_key` balance or ensure your prompt is not triggering safety filters.
+* **Resolution Errors**: If using Seedream, ensure your resolution is set high enough (min 1920x1920). If using Flux, ensure it is within 512-2048.
 
 *Star this repo if it helps your workflow! 🚀*
