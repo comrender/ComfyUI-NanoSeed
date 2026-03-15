@@ -39,7 +39,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
+                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -52,8 +52,10 @@ class NanoSeedEdit:
                 "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 6}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
-                "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16"], {"default": "auto"}),
-                "resolution": (["1K", "2K", "4K"], {"default": "1K"}),
+                "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "4:1", "1:4", "8:1", "1:8"], {"default": "auto"}),
+                "resolution": (["0.5K", "1K", "2K", "4K"], {"default": "1K"}),
+                "enable_web_search": ("BOOLEAN", {"default": False}),
+                "thinking_level": (["off", "minimal", "high"], {"default": "off"}),
             }
         }
 
@@ -65,7 +67,7 @@ class NanoSeedEdit:
 
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
                    width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K",
-                   acceleration="none"):  # Hardcoded to none, kept for compatibility
+                   enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
         if fal_key == "your_fal_key_here":
             raise ValueError("Please set your fal.ai API key in the node.")
         
@@ -88,7 +90,7 @@ class NanoSeedEdit:
             # ensures consistent aspect ratio calculation before sending if needed.
             # Nano models ignore this as per original code.
             if custom_size:
-                if model in ["nano_banana", "nano_banana_pro"]:
+                if model in ["nano_banana", "nano_banana_pro", "nano_banana_2"]:
                     pass
                 else:
                     pil_image = pil_image.resize((width, height), Image.LANCZOS)
@@ -121,6 +123,31 @@ class NanoSeedEdit:
                 "num_images": min(num_images, 4),
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
+                "output_format": "png",
+                "sync_mode": True,
+            }
+        elif model == "nano_banana_2":
+            url = "https://fal.run/fal-ai/nano-banana-2/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,
+                "num_images": min(num_images, 4),
+                "seed": seed,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "output_format": "png",
+                "enable_web_search": enable_web_search,
+                "limit_generations": True,
+                "sync_mode": True,
+            }
+            if thinking_level != "off":
+                payload["thinking_level"] = thinking_level
+        elif model == "grok_imagine_edit":
+            url = "https://fal.run/xai/grok-imagine-image/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris[:3],
+                "num_images": min(num_images, 4),
                 "output_format": "png",
                 "sync_mode": True,
             }
