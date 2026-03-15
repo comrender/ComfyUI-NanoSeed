@@ -2,7 +2,7 @@
 
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![Fal.ai](https://img.shields.io/badge/Backend-Fal.ai-purple)
 
-A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing APIs. This node allows you to edit images using natural language prompts via state-of-the-art models like Flux2 (standard, Pro, Flex), Qwen, Seedream 4.5, and Nano Banana 1/Pro.
+A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing APIs. This node allows you to edit images using the latest Image Editing Models available via Fal.ai API.
 <img width="925" height="464" alt="image" src="https://github.com/user-attachments/assets/e8cce9fc-dacb-4027-a1cf-4e29ace68329" />
 ## ✨ Features
 
@@ -17,6 +17,8 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 | :--- | :--- | :--- |
 | **Nano Banana** | `nano_banana` | Fast, efficient editing. |
 | **Nano Banana Pro** | `nano_banana_pro` | Enhanced quality version of Nano Banana. |
+| **Nano Banana 2** | `nano_banana_2` | New generation model with web search and thinking options. |
+| **Grok Imagine Edit** | `grok_imagine_edit` | xAI image edit model, up to 3 input images. |
 | **Seedream 4.5** | `seedream_4.5` | ByteDance's model. Optimized for high-res editing. |
 | **Qwen Edit Plus** | `qwen_edit_plus` | Powerful instruction-based editing with guidance control. |
 | **Flux 2 (Standard, Pro, Flex)** | `flux_2_edit` | (BFL) High-fidelity editing capabilities. |
@@ -58,6 +60,8 @@ You must have a **Fal.ai API Key** to use this node.
 * **num_images**: How many variations to generate (Max 6).
 * **seed**: Seed for reproducibility.
 * **aspect_ratio**: Set target aspect ratio (e.g., 16:9, 1:1).
+* **enable_web_search**: Enables web search context for supported models.
+* **thinking_level**: `off`, `minimal`, or `high` for supported models.
 
 ### ⚠️ Model Specific Constraints
 
@@ -72,8 +76,14 @@ Different models have different requirements implemented in the node:
     * **Pixel Count:** Total pixels (W x H) must be between ~3.6MP and 16.7MP.
     * **Batch Limit:** The sum of input images and output `num_images` cannot exceed 15.
 
-3.  **Nano Banana / Pro**:
-    * These models rely on `aspect_ratio` and `resolution` (1K/2K/4K) settings rather than custom width/height integers.
+3.  **Nano Banana / Pro / 2**:
+    * These models rely on `aspect_ratio` and `resolution` settings rather than custom width/height integers.
+    * `nano_banana_2` supports `0.5K`, `1K`, `2K`, and `4K` resolution presets.
+    * `nano_banana_2` also supports extended aspect ratios: `4:1`, `1:4`, `8:1`, and `1:8`.
+
+4.  **Grok Imagine Edit (`grok_imagine_edit`)**:
+    * Supports up to **3 input images**.
+    * Uses up to **4 output images**.
 
 ## 🛠️ Troubleshooting
 
