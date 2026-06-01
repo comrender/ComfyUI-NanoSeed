@@ -32,6 +32,19 @@ def pil2tensor(pil_image):
     arr = arr[np.newaxis, ...]
     return torch.from_numpy(arr)
 
+def tensor2data_uri(image_tensor):
+    pil_image = tensor2pil(image_tensor)
+    if pil_image is None:
+        return None
+
+    return pil2data_uri(pil_image)
+
+def pil2data_uri(pil_image):
+    buffer = BytesIO()
+    pil_image.save(buffer, format="PNG")
+    img_str = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
 # Main node class
 class NanoSeedEdit:
     @classmethod
@@ -39,7 +52,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
+                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -48,12 +61,19 @@ class NanoSeedEdit:
                 "image3": ("IMAGE",),
                 "image4": ("IMAGE",),
                 "image5": ("IMAGE",),
+                "image6": ("IMAGE",),
+                "image7": ("IMAGE",),
+                "image8": ("IMAGE",),
+                "image9": ("IMAGE",),
+                "image10": ("IMAGE",),
+                "mask": ("IMAGE",),
                 "width": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 6}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
                 "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "4:1", "1:4", "8:1", "1:8"], {"default": "auto"}),
                 "resolution": (["0.5K", "1K", "2K", "4K"], {"default": "1K"}),
+                "quality": (["low", "medium", "high"], {"default": "high"}),
                 "enable_web_search": ("BOOLEAN", {"default": False}),
                 "thinking_level": (["off", "minimal", "high"], {"default": "off"}),
             }
@@ -66,13 +86,15 @@ class NanoSeedEdit:
     OUTPUT_NODE = True
 
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
+                   image6=None, image7=None, image8=None, image9=None, image10=None, mask=None,
                    width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K",
-                   enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
+                   quality="high", enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
         if fal_key == "your_fal_key_here":
             raise ValueError("Please set your fal.ai API key in the node.")
         
         # Collect all non-None images
-        images = [img for img in [image1, image2, image3, image4, image5] if img is not None]
+        image_inputs = [image1, image2, image3, image4, image5, image6, image7, image8, image9, image10]
+        images = [img for img in image_inputs if img is not None]
         if not images:
             raise ValueError("At least one image input must be connected.")
         
@@ -95,10 +117,9 @@ class NanoSeedEdit:
                 else:
                     pil_image = pil_image.resize((width, height), Image.LANCZOS)
             
-            buffer = BytesIO()
-            pil_image.save(buffer, format="PNG")
-            img_str = base64.b64encode(buffer.getvalue()).decode()
-            img_data_uris.append(f"data:image/png;base64,{img_str}")
+            img_data_uri = pil2data_uri(pil_image)
+            if img_data_uri is not None:
+                img_data_uris.append(img_data_uri)
         
         # Enforce limits (Updated: Removed Flux 2 single image limit)
         if model == "seedream_4.5" and len(img_data_uris) + num_images > 15:
@@ -138,10 +159,27 @@ class NanoSeedEdit:
                 "output_format": "png",
                 "enable_web_search": enable_web_search,
                 "limit_generations": True,
+                "safety_tolerance": "6",
                 "sync_mode": True,
             }
             if thinking_level != "off":
                 payload["thinking_level"] = thinking_level
+        elif model == "gpt_image_2_edit":
+            url = "https://fal.run/openai/gpt-image-2/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris,
+                "quality": quality,
+                "num_images": num_images,
+                "output_format": "png",
+                "sync_mode": True,
+            }
+            if custom_size:
+                payload["image_size"] = {"width": width, "height": height}
+            if mask is not None:
+                mask_data_uri = tensor2data_uri(mask)
+                if mask_data_uri is not None:
+                    payload["mask_image_url"] = mask_data_uri
         elif model == "grok_imagine_edit":
             url = "https://fal.run/xai/grok-imagine-image/edit"
             payload = {
