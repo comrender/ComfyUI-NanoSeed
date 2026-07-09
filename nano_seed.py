@@ -52,7 +52,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
+                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "seedream_5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -207,6 +207,26 @@ class NanoSeedEdit:
                 if not (3686400 <= area <= 16777216):
                     raise ValueError(f"Seedream 4.5: Image area must be 3,686,400-16,777,216px. Got {area}.")
                 payload["image_size"] = {"width": width, "height": height}
+        elif model == "seedream_5":
+            url = "https://fal.run/bytedance/seedream/v5/pro/edit"
+            payload = {
+                "prompt": prompt,
+                "image_urls": img_data_uris[:10],
+                "num_images": min(num_images, 6),
+                "output_format": "png",
+                "enable_safety_checker": False,
+                "sync_mode": True,
+            }
+            if custom_size:
+                area = width * height
+                aspect = width / height
+                if not (1048576 <= area <= 4194304):
+                    raise ValueError(f"Seedream 5: Image area must be 1,048,576-4,194,304px. Got {area}.")
+                if not (1 / 16 <= aspect <= 16):
+                    raise ValueError(f"Seedream 5: Aspect ratio must be between 1:16 and 16:1. Got {width}:{height}.")
+                payload["image_size"] = {"width": width, "height": height}
+            else:
+                payload["image_size"] = "auto_2K"
         elif model == "qwen_edit_plus":
             url = "https://fal.run/fal-ai/qwen-image-edit-plus"
             payload = {
