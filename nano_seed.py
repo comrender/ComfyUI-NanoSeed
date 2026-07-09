@@ -5,6 +5,89 @@ import numpy as np
 from io import BytesIO
 from PIL import Image
 
+SEEDREAM_5_AUTO_IMAGE_SIZE_BY_RESOLUTION = {
+    "seedream_5": {
+        "0.5K": "auto_1K",
+        "1K": "auto_1K",
+        "2K": "auto_2K",
+        "4K": "auto_2K",
+    },
+    "seedream_5_pro": {
+        "0.5K": "auto_1K",
+        "1K": "auto_1K",
+        "2K": "auto_2K",
+        "4K": "auto_2K",
+    },
+    "seedream_5_lite": {
+        "0.5K": "auto_2K",
+        "1K": "auto_2K",
+        "2K": "auto_2K",
+        "4K": "auto_4K",
+    },
+}
+
+SEEDREAM_5_RESOLUTION_PIXELS = {
+    "seedream_5": {
+        "0.5K": 1024 * 1024,
+        "1K": 1024 * 1024,
+        "2K": 2048 * 2048,
+        "4K": 2048 * 2048,
+    },
+    "seedream_5_pro": {
+        "0.5K": 1024 * 1024,
+        "1K": 1024 * 1024,
+        "2K": 2048 * 2048,
+        "4K": 2048 * 2048,
+    },
+    "seedream_5_lite": {
+        "0.5K": 2560 * 1440,
+        "1K": 2560 * 1440,
+        "2K": 2048 * 2048,
+        "4K": 4096 * 4096,
+    },
+}
+
+
+def _round_to_multiple(value, multiple=8):
+    return max(multiple, int(round(value / multiple)) * multiple)
+
+
+def seedream_5_image_size(aspect_ratio, resolution, model="seedream_5"):
+    auto_sizes = SEEDREAM_5_AUTO_IMAGE_SIZE_BY_RESOLUTION.get(
+        model,
+        SEEDREAM_5_AUTO_IMAGE_SIZE_BY_RESOLUTION["seedream_5"],
+    )
+    resolution_pixels = SEEDREAM_5_RESOLUTION_PIXELS.get(
+        model,
+        SEEDREAM_5_RESOLUTION_PIXELS["seedream_5"],
+    )
+
+    if aspect_ratio == "auto":
+        return auto_sizes.get(resolution, auto_sizes["2K"])
+
+    width_ratio, height_ratio = [int(part) for part in aspect_ratio.split(":", 1)]
+    ratio = width_ratio / height_ratio
+    target_pixels = resolution_pixels.get(resolution, resolution_pixels["2K"])
+
+    width = (target_pixels * ratio) ** 0.5
+    height = target_pixels / width
+
+    max_dimension = 4096
+    if width > max_dimension:
+        scale = max_dimension / width
+        width *= scale
+        height *= scale
+    if height > max_dimension:
+        scale = max_dimension / height
+        width *= scale
+        height *= scale
+
+    return {
+        "width": _round_to_multiple(width),
+        "height": _round_to_multiple(height),
+    }
+
+
 # Helper function to convert ComfyUI tensor (B=1, H, W, C) to PIL Image (RGB)
 def tensor2pil(image_tensor):
     if image_tensor is None or image_tensor.shape[0] == 0:
@@ -52,7 +135,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "seedream_5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
+                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "seedream_5", "seedream_5_lite", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -123,8 +206,8 @@ class NanoSeedEdit:
                 img_data_uris.append(img_data_uri)
         
         # Enforce limits (Updated: Removed Flux 2 single image limit)
-        if model == "seedream_4.5" and len(img_data_uris) + num_images > 15:
-            raise ValueError("Seedream 4.5: Total inputs + outputs must <=15.")
+        if model in ["seedream_4.5", "seedream_5", "seedream_5_pro", "seedream_5_lite"] and len(img_data_uris) + num_images > 15:
+            raise ValueError("Seedream: Total inputs + outputs must <=15.")
         
         # Model-specific payloads
         if model == "nano_banana":
@@ -207,26 +290,23 @@ class NanoSeedEdit:
                 if not (3686400 <= area <= 16777216):
                     raise ValueError(f"Seedream 4.5: Image area must be 3,686,400-16,777,216px. Got {area}.")
                 payload["image_size"] = {"width": width, "height": height}
-        elif model == "seedream_5":
-            url = "https://fal.run/bytedance/seedream/v5/pro/edit"
+        elif model in ["seedream_5", "seedream_5_pro", "seedream_5_lite"]:
+            if model in ["seedream_5", "seedream_5_pro"]:
+                url = "https://fal.run/bytedance/seedream/v5/pro/edit"
+            else:
+                url = "https://fal.run/fal-ai/bytedance/seedream/v5/lite/edit"
             payload = {
                 "prompt": prompt,
                 "image_urls": img_data_uris[:10],
+                "image_size": seedream_5_image_size(aspect_ratio, resolution, model),
                 "num_images": min(num_images, 6),
-                "output_format": "png",
                 "enable_safety_checker": False,
                 "sync_mode": True,
             }
-            if custom_size:
-                area = width * height
-                aspect = width / height
-                if not (1048576 <= area <= 4194304):
-                    raise ValueError(f"Seedream 5: Image area must be 1,048,576-4,194,304px. Got {area}.")
-                if not (1 / 16 <= aspect <= 16):
-                    raise ValueError(f"Seedream 5: Aspect ratio must be between 1:16 and 16:1. Got {width}:{height}.")
-                payload["image_size"] = {"width": width, "height": height}
+            if model in ["seedream_5", "seedream_5_pro"]:
+                payload["output_format"] = "png"
             else:
-                payload["image_size"] = "auto_2K"
+                payload["max_images"] = 1
         elif model == "qwen_edit_plus":
             url = "https://fal.run/fal-ai/qwen-image-edit-plus"
             payload = {
