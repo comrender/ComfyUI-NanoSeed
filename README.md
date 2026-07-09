@@ -22,6 +22,7 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 | **Seedream 4.5** | `seedream_4.5` | ByteDance's model. Optimized for high-res editing. |
 | **Qwen Edit Plus** | `qwen_edit_plus` | Powerful instruction-based editing with guidance control. |
 | **Flux 2 (Standard, Pro, Flex)** | `flux_2_edit` | (BFL) High-fidelity editing capabilities. |
+| **Flux 2 Klein 9B Edit** | `flux_2_klein_9b_edit` | Fast FLUX.2 Klein 9B image editing model. |
 
 ## 📦 Installation
 
@@ -58,6 +59,7 @@ You must have a **Fal.ai API Key** to use this node.
     * *Note:* `nano_banana` models ignore this and use `aspect_ratio`.
     * *Note:* `seedream_4.5` requires high resolutions (see constraints below).
 * **num_images**: How many variations to generate (Max 6).
+* **num_inference_steps**: Number of inference steps for supported models.
 * **seed**: Seed for reproducibility.
 * **aspect_ratio**: Set target aspect ratio (e.g., 16:9, 1:1).
 * **enable_web_search**: Enables web search context for supported models.
@@ -71,17 +73,21 @@ Different models have different requirements implemented in the node:
     * **Single Image Only:** Do not connect `image2` through `image5`.
     * **Resolution:** Width and Height must be between **512px and 2048px**.
 
-2.  **Seedream 4.5 (`seedream_4.5`)**:
+2.  **Flux 2 Klein 9B Edit (`flux_2_klein_9b_edit`)**:
+    * Supports up to **4 input images**.
+    * `num_inference_steps` is limited to **4-8**.
+
+3.  **Seedream 4.5 (`seedream_4.5`)**:
     * **High Res Only:** Width and Height must be between **1920px and 4096px**.
     * **Pixel Count:** Total pixels (W x H) must be between ~3.6MP and 16.7MP.
     * **Batch Limit:** The sum of input images and output `num_images` cannot exceed 15.
 
-3.  **Nano Banana / Pro / 2**:
+4.  **Nano Banana / Pro / 2**:
     * These models rely on `aspect_ratio` and `resolution` settings rather than custom width/height integers.
     * `nano_banana_2` supports `0.5K`, `1K`, `2K`, and `4K` resolution presets.
     * `nano_banana_2` also supports extended aspect ratios: `4:1`, `1:4`, `8:1`, and `1:8`.
 
-4.  **Grok Imagine Edit (`grok_imagine_edit`)**:
+5.  **Grok Imagine Edit (`grok_imagine_edit`)**:
     * Supports up to **3 input images**.
     * Uses up to **4 output images**.
 

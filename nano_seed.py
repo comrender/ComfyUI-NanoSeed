@@ -52,7 +52,7 @@ class NanoSeedEdit:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
-                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex"],),
+                "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
                 "fal_key": ("STRING", {"default": "your_fal_key_here"}),
             },
             "optional": {
@@ -70,6 +70,7 @@ class NanoSeedEdit:
                 "width": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 4096, "display": "number"}),
                 "num_images": ("INT", {"default": 1, "min": 1, "max": 6}),
+                "num_inference_steps": ("INT", {"default": 28, "min": 1, "max": 100}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
                 "aspect_ratio": (["auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "4:1", "1:4", "8:1", "1:8"], {"default": "auto"}),
                 "resolution": (["0.5K", "1K", "2K", "4K"], {"default": "1K"}),
@@ -87,7 +88,7 @@ class NanoSeedEdit:
 
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
                    image6=None, image7=None, image8=None, image9=None, image10=None, mask=None,
-                   width=0, height=0, num_images=1, seed=0, aspect_ratio="auto", resolution="1K",
+                   width=0, height=0, num_images=1, num_inference_steps=28, seed=0, aspect_ratio="auto", resolution="1K",
                    quality="high", enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
         if fal_key == "your_fal_key_here":
             raise ValueError("Please set your fal.ai API key in the node.")
@@ -196,7 +197,7 @@ class NanoSeedEdit:
                 "image_urls": img_data_uris,
                 "num_images": min(num_images, 6),
                 "seed": seed,
-                "enable_safety_checker": True,
+                "enable_safety_checker": False,
                 "sync_mode": True,
             }
             if custom_size:
@@ -214,8 +215,8 @@ class NanoSeedEdit:
                 "num_images": min(num_images, 4),
                 "seed": seed,
                 "guidance_scale": 4.0,
-                "num_inference_steps": 50,
-                "enable_safety_checker": True,
+                "num_inference_steps": num_inference_steps,
+                "enable_safety_checker": False,
                 "output_format": "png",
                 "sync_mode": True,
                 "acceleration": acceleration,
@@ -223,28 +224,35 @@ class NanoSeedEdit:
             if custom_size:
                 payload["image_size"] = {"width": width, "height": height}
         
-        # Combined logic for Flux 2 Edit, Pro, and Flex
-        elif model in ["flux_2_edit", "flux_2_pro", "flux_2_flex"]:
+        # Combined logic for Flux 2 Edit, Pro, Flex, and Klein 9B
+        elif model in ["flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"]:
             if model == "flux_2_edit":
                 url = "https://fal.run/fal-ai/flux-2/edit"
             elif model == "flux_2_pro":
                 url = "https://fal.run/fal-ai/flux-2-pro/edit"
             elif model == "flux_2_flex":
                 url = "https://fal.run/fal-ai/flux-2-flex/edit"
+            elif model == "flux_2_klein_9b_edit":
+                url = "https://fal.run/fal-ai/flux-2/klein/9b/edit"
+
+            inference_steps = num_inference_steps
+            if model == "flux_2_klein_9b_edit":
+                inference_steps = min(max(num_inference_steps, 4), 8)
 
             payload = {
                 "prompt": prompt,
-                "image_urls": img_data_uris, # Sends all connected images
+                "image_urls": img_data_uris[:4] if model == "flux_2_klein_9b_edit" else img_data_uris,
                 "num_images": min(num_images, 4),
                 "seed": seed,
-                "guidance_scale": 2.5,
-                "num_inference_steps": 28,
-                "enable_prompt_expansion": False,
-                "enable_safety_checker": True,
+                "num_inference_steps": inference_steps,
+                "enable_safety_checker": False,
                 "output_format": "png",
                 "sync_mode": True,
-                "acceleration": acceleration,
             }
+            if model != "flux_2_klein_9b_edit":
+                payload["guidance_scale"] = 2.5
+                payload["enable_prompt_expansion"] = False
+                payload["acceleration"] = acceleration
             
             if custom_size:
                 # Standard validation for Flux Edit, relaxed for Pro/Flex as they might handle more
