@@ -1,3 +1,4 @@
+import os
 import torch
 import requests
 import base64
@@ -136,7 +137,7 @@ class NanoSeedEdit:
             "required": {
                 "prompt": ("STRING", {"default": "Edit the image according to this prompt.", "multiline": True}),
                 "model": (["nano_banana", "nano_banana_pro", "nano_banana_2", "gpt_image_2_edit", "grok_imagine_edit", "seedream_4.5", "seedream_5", "seedream_5_lite", "qwen_edit_plus", "flux_2_edit", "flux_2_pro", "flux_2_flex", "flux_2_klein_9b_edit"],),
-                "fal_key": ("STRING", {"default": "your_fal_key_here"}),
+                "fal_key": ("STRING", {"default": "", "multiline": False}),
             },
             "optional": {
                 "image1": ("IMAGE",),
@@ -173,8 +174,21 @@ class NanoSeedEdit:
                    image6=None, image7=None, image8=None, image9=None, image10=None, mask=None,
                    width=0, height=0, num_images=1, num_inference_steps=28, seed=0, aspect_ratio="auto", resolution="1K",
                    quality="high", enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
-        if fal_key == "your_fal_key_here":
-            raise ValueError("Please set your fal.ai API key in the node.")
+        env_fal_key = (os.environ.get("FAL_KEY") or "").strip()
+        ui_fal_key = (fal_key or "").strip()
+        if ui_fal_key == "your_fal_key_here":
+            ui_fal_key = ""
+
+        if env_fal_key:
+            fal_key = env_fal_key
+            if ui_fal_key and ui_fal_key != env_fal_key:
+                print("NanoSeed Info: Using FAL_KEY from environment (UI key ignored).")
+        elif ui_fal_key:
+            fal_key = ui_fal_key
+        else:
+            raise ValueError(
+                "Missing API key. Set FAL_KEY in your environment or provide a key in the node UI."
+            )
         
         # Collect all non-None images
         image_inputs = [image1, image2, image3, image4, image5, image6, image7, image8, image9, image10]
