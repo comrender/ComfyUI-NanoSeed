@@ -277,7 +277,7 @@ class NanoSeedEdit:
             if mask is not None:
                 mask_data_uri = tensor2data_uri(mask)
                 if mask_data_uri is not None:
-                    payload["mask_image_url"] = mask_data_uri
+                    payload["mask_url"] = mask_data_uri
         elif model == "grok_imagine_edit":
             url = "https://fal.run/xai/grok-imagine-image/edit"
             payload = {
