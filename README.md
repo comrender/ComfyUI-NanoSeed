@@ -7,9 +7,10 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 ## ✨ Features
 
 * **Multi-Model Support:** Access multiple editing models from a single node.
-* **Multi-Image Input:** Support for up to 5 input images for context-aware editing (model dependent).
+* **Multi-Image Input:** Support for up to 10 input images for context-aware editing (model dependent).
 * **Flexible Output:** Control aspect ratios, resolution, and batch size.
-* **Cloud Inference:** Offloads heavy GPU processing to Fal.ai's cloud infrastructure.
+* **Asynchronous Queue:** Every model uses fal.ai's durable queue with status polling and automatic provider-side retries.
+* **Bounded Concurrency:** Submit up to 8 independent runs in parallel while preserving output order.
 
 ## 🚀 Supported Models
 
@@ -18,6 +19,7 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 | **Nano Banana** | `nano_banana` | Fast, efficient editing. |
 | **Nano Banana Pro** | `nano_banana_pro` | Enhanced quality version of Nano Banana. |
 | **Nano Banana 2** | `nano_banana_2` | New generation model with web search and thinking options. |
+| **GPT Image 2 Edit** | `gpt_image_2_edit` | OpenAI image editing with quality and mask controls. |
 | **Grok Imagine Edit** | `grok_imagine_edit` | xAI image edit model, up to 3 input images. |
 | **Seedream 4.5** | `seedream_4.5` | ByteDance's model. Optimized for high-res editing. |
 | **Seedream 5 Pro Edit** | `seedream_5` | ByteDance Seedream 5.0 Pro region-precise editing. |
@@ -46,15 +48,16 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 You must have a **Fal.ai API Key** to use this node.
 
 1.  Go to [fal.ai](https://fal.ai/dashboard/keys) and generate an API Key.
-2.  Enter this key into the `fal_key` widget on the node.
+2.  Set `FAL_KEY` in the environment running ComfyUI, or enter the key in the `fal_key` widget. The environment variable takes priority.
 
 ## 🎛️ Usage
 
 ### Inputs
 * **prompt**: (Required) A text description of how to edit the image.
 * **model**: Select the specific AI model to use.
-* **fal_key**: Your API key.
-* **image1 - image5**: Connect the images you want to edit.
+* **fal_key**: Optional UI fallback for your API key when `FAL_KEY` is not set.
+* **image1 - image10**: Connect the images you want to edit.
+* **mask**: Optional GPT Image 2 edit mask. Other models ignore it.
 
 ### Settings
 * **width / height**: Output resolution.
@@ -66,6 +69,8 @@ You must have a **Fal.ai API Key** to use this node.
 * **aspect_ratio**: Set target aspect ratio (e.g., 16:9, 1:1).
 * **enable_web_search**: Enables web search context for supported models.
 * **thinking_level**: `off`, `minimal`, or `high` for supported models.
+* **concurrent_runs**: Number of independent fal.ai queue jobs to submit in parallel. Each run requests its own `num_images`; outputs are returned in run order. Models with an explicit seed increment it for each additional run.
+* **queue_timeout**: Maximum wait per queue job in seconds. Timed-out jobs receive a best-effort cancellation request.
 
 ### ⚠️ Model Specific Constraints
 
@@ -106,7 +111,8 @@ Different models have different requirements implemented in the node:
 
 ## 🛠️ Troubleshooting
 
-* **"No images returned from API"**: Check your `fal_key` balance or ensure your prompt is not triggering safety filters.
+* **Queue failures**: The node reports the failed run number and fal request ID. Check account balance, model access, input validation, and safety filters.
+* **Queue timeout**: Increase `queue_timeout` when fal.ai is busy or when using slower high-resolution models.
 * **Resolution Errors**: If using Seedream, ensure your resolution is set high enough (min 1920x1920). If using Flux, ensure it is within 512-2048.
 
 *Star this repo if it helps your workflow! 🚀*
