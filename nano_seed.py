@@ -1,10 +1,20 @@
 import os
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import torch
 import requests
 import base64
 import numpy as np
 from io import BytesIO
 from PIL import Image
+
+FAL_RUN_URL_PREFIX = "https://fal.run/"
+FAL_QUEUE_URL_PREFIX = "https://queue.fal.run/"
+FAL_HTTP_TIMEOUT_SECONDS = 60
+FAL_QUEUE_POLL_INTERVAL_SECONDS = 1.0
+FAL_MAX_CONCURRENT_RUNS = 8
 
 SEEDREAM_5_AUTO_IMAGE_SIZE_BY_RESOLUTION = {
     "seedream_5": {
@@ -129,6 +139,213 @@ def pil2data_uri(pil_image):
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
+
+def _safe_error_detail(detail):
+    detail = re.sub(
+        r"data:[^,\s\"']+,[A-Za-z0-9+/=]+",
+        "data:[redacted]",
+        str(detail or ""),
+    ).strip()
+    if len(detail) > 1000:
+        return f"{detail[:1000]}..."
+    return detail
+
+
+def _response_json(response, action):
+    if not 200 <= response.status_code < 300:
+        detail = _safe_error_detail(response.text)
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"{action} failed with HTTP {response.status_code}{suffix}")
+
+    try:
+        return response.json()
+    except ValueError as error:
+        raise ValueError(f"{action} returned invalid JSON.") from error
+
+
+def _queue_endpoint(run_url):
+    if not run_url.startswith(FAL_RUN_URL_PREFIX):
+        raise ValueError(f"Unsupported fal.ai endpoint: {run_url}")
+    return f"{FAL_QUEUE_URL_PREFIX}{run_url[len(FAL_RUN_URL_PREFIX):]}"
+
+
+def _queue_operation_url(value, fallback):
+    if not value:
+        return fallback
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return f"{FAL_QUEUE_URL_PREFIX.rstrip('/')}/{value.lstrip('/')}"
+
+
+def _cancel_queue_request(cancel_url, headers):
+    try:
+        requests.put(cancel_url, headers=headers, timeout=10)
+    except requests.RequestException:
+        pass
+
+
+def _submit_fal_queue_request(run_url, payload, headers, queue_timeout, run_index, run_count):
+    queue_url = _queue_endpoint(run_url)
+    try:
+        submit_response = requests.post(
+            queue_url,
+            json=payload,
+            headers=headers,
+            timeout=FAL_HTTP_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as error:
+        raise ValueError(f"fal.ai queue submission failed: {error}") from error
+
+    submit_data = _response_json(submit_response, "fal.ai queue submission")
+    request_id = submit_data.get("request_id")
+    if not request_id:
+        raise ValueError("fal.ai queue submission returned no request_id.")
+
+    request_base_url = f"{queue_url}/requests/{request_id}"
+    status_url = _queue_operation_url(
+        submit_data.get("status_url"),
+        f"{request_base_url}/status",
+    )
+    response_url = _queue_operation_url(
+        submit_data.get("response_url"),
+        request_base_url,
+    )
+    cancel_url = _queue_operation_url(
+        submit_data.get("cancel_url"),
+        f"{request_base_url}/cancel",
+    )
+    deadline = time.monotonic() + queue_timeout
+    run_label = f"{run_index + 1}/{run_count}"
+    print(f"NanoSeed: queued async run {run_label} ({request_id}).")
+
+    while True:
+        if time.monotonic() >= deadline:
+            _cancel_queue_request(cancel_url, headers)
+            raise TimeoutError(
+                f"fal.ai queue run {run_label} timed out after {queue_timeout} seconds "
+                f"(request_id: {request_id})."
+            )
+
+        try:
+            status_response = requests.get(
+                status_url,
+                headers=headers,
+                timeout=FAL_HTTP_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException:
+            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+            continue
+
+        if status_response.status_code in {408, 425, 429, 500, 502, 503, 504}:
+            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+            continue
+
+        status_data = _response_json(status_response, "fal.ai queue status")
+        status = status_data.get("status")
+        if status == "COMPLETED":
+            error_message = _safe_error_detail(status_data.get("error"))
+            if error_message:
+                error_type = status_data.get("error_type")
+                error_suffix = f" ({error_type})" if error_type else ""
+                raise ValueError(
+                    f"fal.ai queue run {run_label} failed{error_suffix}: {error_message}"
+                )
+            response_url = _queue_operation_url(
+                status_data.get("response_url"),
+                response_url,
+            )
+            break
+        if status in {"FAILED", "CANCELLED", "CANCELED"}:
+            error_message = _safe_error_detail(status_data.get("error")) or "Unknown queue error"
+            raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
+        if status not in {"IN_QUEUE", "IN_PROGRESS"}:
+            raise ValueError(
+                f"fal.ai queue run {run_label} returned unknown status: {status!r}"
+            )
+
+        time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"fal.ai result retrieval timed out for run {run_label} "
+                f"(request_id: {request_id})."
+            )
+
+        try:
+            result_response = requests.get(
+                response_url,
+                headers=headers,
+                timeout=FAL_HTTP_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException:
+            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+            continue
+
+        if result_response.status_code in {202, 408, 425, 429, 500, 502, 503, 504}:
+            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+            continue
+
+        result = _response_json(result_response, "fal.ai queue result")
+        if result.get("error") and not result.get("images"):
+            error_message = _safe_error_detail(result["error"])
+            raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
+        print(f"NanoSeed: completed async run {run_label} ({request_id}).")
+        return result
+
+
+def _run_fal_queue_requests(run_url, payload, headers, concurrent_runs, queue_timeout):
+    if not 1 <= concurrent_runs <= FAL_MAX_CONCURRENT_RUNS:
+        raise ValueError(
+            f"concurrent_runs must be between 1 and {FAL_MAX_CONCURRENT_RUNS}."
+        )
+    if queue_timeout < 1:
+        raise ValueError("queue_timeout must be at least 1 second.")
+
+    def run_request(run_index):
+        run_payload = dict(payload)
+        run_payload["sync_mode"] = False
+        run_headers = dict(headers)
+        run_headers["X-Fal-Request-Timeout"] = str(queue_timeout)
+        if run_index and isinstance(run_payload.get("seed"), int):
+            run_payload["seed"] = (run_payload["seed"] + run_index) % (2**32)
+        return _submit_fal_queue_request(
+            run_url,
+            run_payload,
+            run_headers,
+            queue_timeout,
+            run_index,
+            concurrent_runs,
+        )
+
+    if concurrent_runs == 1:
+        return [run_request(0)]
+
+    ordered_results = [None] * concurrent_runs
+    failures = []
+    with ThreadPoolExecutor(max_workers=concurrent_runs) as executor:
+        future_to_index = {
+            executor.submit(run_request, run_index): run_index
+            for run_index in range(concurrent_runs)
+        }
+        for future in as_completed(future_to_index):
+            run_index = future_to_index[future]
+            try:
+                ordered_results[run_index] = future.result()
+            except Exception as error:
+                failures.append((run_index, error))
+
+    if failures:
+        details = "; ".join(
+            f"run {run_index + 1}: {error}"
+            for run_index, error in sorted(failures)
+        )
+        raise ValueError(
+            f"{len(failures)} of {concurrent_runs} fal.ai async runs failed: {details}"
+        )
+
+    return ordered_results
+
 # Main node class
 class NanoSeedEdit:
     @classmethod
@@ -161,6 +378,8 @@ class NanoSeedEdit:
                 "quality": (["low", "medium", "high"], {"default": "high"}),
                 "enable_web_search": ("BOOLEAN", {"default": False}),
                 "thinking_level": (["off", "minimal", "high"], {"default": "off"}),
+                "concurrent_runs": ("INT", {"default": 1, "min": 1, "max": 8, "step": 1}),
+                "queue_timeout": ("INT", {"default": 900, "min": 60, "max": 3600, "step": 30}),
             }
         }
 
@@ -173,7 +392,8 @@ class NanoSeedEdit:
     def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
                    image6=None, image7=None, image8=None, image9=None, image10=None, mask=None,
                    width=0, height=0, num_images=1, num_inference_steps=28, seed=0, aspect_ratio="auto", resolution="1K",
-                   quality="high", enable_web_search=False, thinking_level="off", acceleration="none"):  # Hardcoded to none, kept for compatibility
+                   quality="high", enable_web_search=False, thinking_level="off", acceleration="none",
+                   concurrent_runs=1, queue_timeout=900):  # Hardcoded to none, kept for compatibility
         env_fal_key = (os.environ.get("FAL_KEY") or "").strip()
         ui_fal_key = (fal_key or "").strip()
         if ui_fal_key == "your_fal_key_here":
@@ -232,7 +452,7 @@ class NanoSeedEdit:
                 "num_images": min(num_images, 4),
                 "aspect_ratio": aspect_ratio,
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
             }
         elif model == "nano_banana_pro":
             url = "https://fal.run/fal-ai/nano-banana-pro/edit"
@@ -243,7 +463,7 @@ class NanoSeedEdit:
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
             }
         elif model == "nano_banana_2":
             url = "https://fal.run/fal-ai/nano-banana-2/edit"
@@ -258,7 +478,7 @@ class NanoSeedEdit:
                 "enable_web_search": enable_web_search,
                 "limit_generations": True,
                 "safety_tolerance": "6",
-                "sync_mode": True,
+                "sync_mode": False,
             }
             if thinking_level != "off":
                 payload["thinking_level"] = thinking_level
@@ -270,7 +490,7 @@ class NanoSeedEdit:
                 "quality": quality,
                 "num_images": num_images,
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
             }
             if custom_size:
                 payload["image_size"] = {"width": width, "height": height}
@@ -285,7 +505,7 @@ class NanoSeedEdit:
                 "image_urls": img_data_uris[:3],
                 "num_images": min(num_images, 4),
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
             }
         elif model == "seedream_4.5":
             url = "https://fal.run/fal-ai/bytedance/seedream/v4.5/edit"
@@ -295,7 +515,7 @@ class NanoSeedEdit:
                 "num_images": min(num_images, 6),
                 "seed": seed,
                 "enable_safety_checker": False,
-                "sync_mode": True,
+                "sync_mode": False,
             }
             if custom_size:
                 if not (1920 <= width <= 4096 and 1920 <= height <= 4096):
@@ -315,7 +535,7 @@ class NanoSeedEdit:
                 "image_size": seedream_5_image_size(aspect_ratio, resolution, model),
                 "num_images": min(num_images, 6),
                 "enable_safety_checker": False,
-                "sync_mode": True,
+                "sync_mode": False,
             }
             if model in ["seedream_5", "seedream_5_pro"]:
                 payload["output_format"] = "png"
@@ -332,7 +552,7 @@ class NanoSeedEdit:
                 "num_inference_steps": num_inference_steps,
                 "enable_safety_checker": False,
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
                 "acceleration": acceleration,
             }
             if custom_size:
@@ -361,7 +581,7 @@ class NanoSeedEdit:
                 "num_inference_steps": inference_steps,
                 "enable_safety_checker": False,
                 "output_format": "png",
-                "sync_mode": True,
+                "sync_mode": False,
             }
             if model != "flux_2_klein_9b_edit":
                 payload["guidance_scale"] = 2.5
@@ -376,39 +596,56 @@ class NanoSeedEdit:
                 
                 payload["image_size"] = {"width": width, "height": height}
 
-        # API call
         headers = {
             "Authorization": f"Key {fal_key}",
             "Content-Type": "application/json",
         }
-        response = requests.post(url, json=payload, headers=headers)
-        if response.status_code != 200:
-            raise ValueError(f"API error: {response.text}")
-
-        api_result = response.json()
-        if "images" not in api_result or len(api_result["images"]) == 0:
-            raise ValueError("No images returned from API")
+        api_results = _run_fal_queue_requests(
+            url,
+            payload,
+            headers,
+            concurrent_runs,
+            queue_timeout,
+        )
 
         all_edited_tensors = []
 
-        # Process up to num_images
-        for img_info in api_result["images"][:num_images]:
-            img_data = img_info.get("data_uri") or img_info.get("url")
-            if not img_data:
-                continue
+        for run_index, api_result in enumerate(api_results):
+            output_images = api_result.get("images") or []
+            if not output_images and api_result.get("image"):
+                output_images = [api_result["image"]]
+            if not output_images:
+                raise ValueError(
+                    f"No images returned from fal.ai async run {run_index + 1}."
+                )
 
-            if img_data.startswith("data:"):
-                _, encoded = img_data.split(",", 1)
-                pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
-            else:
-                img_resp = requests.get(img_data)
-                if img_resp.status_code != 200:
-                    raise ValueError("Failed to download generated image")
-                pil_edited = Image.open(BytesIO(img_resp.content))
+            for img_info in output_images[:num_images]:
+                img_data = img_info.get("data_uri") or img_info.get("url")
+                if not img_data:
+                    continue
 
-            tensor_edited = pil2tensor(pil_edited)
-            if tensor_edited is not None:
-                all_edited_tensors.append(tensor_edited)
+                if img_data.startswith("data:"):
+                    _, encoded = img_data.split(",", 1)
+                    pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
+                else:
+                    try:
+                        img_resp = requests.get(
+                            img_data,
+                            timeout=FAL_HTTP_TIMEOUT_SECONDS,
+                        )
+                    except requests.RequestException as error:
+                        raise ValueError(
+                            f"Failed to download generated image: {error}"
+                        ) from error
+                    if img_resp.status_code != 200:
+                        raise ValueError(
+                            f"Failed to download generated image (HTTP {img_resp.status_code})."
+                        )
+                    pil_edited = Image.open(BytesIO(img_resp.content))
+
+                tensor_edited = pil2tensor(pil_edited)
+                if tensor_edited is not None:
+                    all_edited_tensors.append(tensor_edited)
 
         # Stack output
         if all_edited_tensors:
