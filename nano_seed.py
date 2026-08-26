@@ -1,7 +1,7 @@
+import asyncio
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import torch
 import requests
@@ -140,6 +140,18 @@ def pil2data_uri(pil_image):
     return f"data:image/png;base64,{img_str}"
 
 
+def _prepare_image_data_uris(images, resize_to=None):
+    data_uris = []
+    for image_tensor in images:
+        pil_image = tensor2pil(image_tensor)
+        if pil_image is None:
+            continue
+        if resize_to is not None:
+            pil_image = pil_image.resize(resize_to, Image.LANCZOS)
+        data_uris.append(pil2data_uri(pil_image))
+    return data_uris
+
+
 def _safe_error_detail(detail):
     detail = re.sub(
         r"data:[^,\s\"']+,[A-Za-z0-9+/=]+",
@@ -177,17 +189,23 @@ def _queue_operation_url(value, fallback):
     return f"{FAL_QUEUE_URL_PREFIX.rstrip('/')}/{value.lstrip('/')}"
 
 
-def _cancel_queue_request(cancel_url, headers):
+async def _cancel_queue_request(cancel_url, headers):
     try:
-        requests.put(cancel_url, headers=headers, timeout=10)
+        await asyncio.to_thread(
+            requests.put,
+            cancel_url,
+            headers=headers,
+            timeout=10,
+        )
     except requests.RequestException:
         pass
 
 
-def _submit_fal_queue_request(run_url, payload, headers, queue_timeout, run_index, run_count):
+async def _submit_fal_queue_request(run_url, payload, headers, queue_timeout, run_index, run_count):
     queue_url = _queue_endpoint(run_url)
     try:
-        submit_response = requests.post(
+        submit_response = await asyncio.to_thread(
+            requests.post,
             queue_url,
             json=payload,
             headers=headers,
@@ -218,83 +236,89 @@ def _submit_fal_queue_request(run_url, payload, headers, queue_timeout, run_inde
     run_label = f"{run_index + 1}/{run_count}"
     print(f"NanoSeed: queued async run {run_label} ({request_id}).")
 
-    while True:
-        if time.monotonic() >= deadline:
-            _cancel_queue_request(cancel_url, headers)
-            raise TimeoutError(
-                f"fal.ai queue run {run_label} timed out after {queue_timeout} seconds "
-                f"(request_id: {request_id})."
-            )
-
-        try:
-            status_response = requests.get(
-                status_url,
-                headers=headers,
-                timeout=FAL_HTTP_TIMEOUT_SECONDS,
-            )
-        except requests.RequestException:
-            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
-            continue
-
-        if status_response.status_code in {408, 425, 429, 500, 502, 503, 504}:
-            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
-            continue
-
-        status_data = _response_json(status_response, "fal.ai queue status")
-        status = status_data.get("status")
-        if status == "COMPLETED":
-            error_message = _safe_error_detail(status_data.get("error"))
-            if error_message:
-                error_type = status_data.get("error_type")
-                error_suffix = f" ({error_type})" if error_type else ""
-                raise ValueError(
-                    f"fal.ai queue run {run_label} failed{error_suffix}: {error_message}"
+    try:
+        while True:
+            if time.monotonic() >= deadline:
+                await _cancel_queue_request(cancel_url, headers)
+                raise TimeoutError(
+                    f"fal.ai queue run {run_label} timed out after {queue_timeout} seconds "
+                    f"(request_id: {request_id})."
                 )
-            response_url = _queue_operation_url(
-                status_data.get("response_url"),
-                response_url,
-            )
-            break
-        if status in {"FAILED", "CANCELLED", "CANCELED"}:
-            error_message = _safe_error_detail(status_data.get("error")) or "Unknown queue error"
-            raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
-        if status not in {"IN_QUEUE", "IN_PROGRESS"}:
-            raise ValueError(
-                f"fal.ai queue run {run_label} returned unknown status: {status!r}"
-            )
 
-        time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+            try:
+                status_response = await asyncio.to_thread(
+                    requests.get,
+                    status_url,
+                    headers=headers,
+                    timeout=FAL_HTTP_TIMEOUT_SECONDS,
+                )
+            except requests.RequestException:
+                await asyncio.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+                continue
 
-    while True:
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"fal.ai result retrieval timed out for run {run_label} "
-                f"(request_id: {request_id})."
-            )
+            if status_response.status_code in {408, 425, 429, 500, 502, 503, 504}:
+                await asyncio.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+                continue
 
-        try:
-            result_response = requests.get(
-                response_url,
-                headers=headers,
-                timeout=FAL_HTTP_TIMEOUT_SECONDS,
-            )
-        except requests.RequestException:
-            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
-            continue
+            status_data = _response_json(status_response, "fal.ai queue status")
+            status = status_data.get("status")
+            if status == "COMPLETED":
+                error_message = _safe_error_detail(status_data.get("error"))
+                if error_message:
+                    error_type = status_data.get("error_type")
+                    error_suffix = f" ({error_type})" if error_type else ""
+                    raise ValueError(
+                        f"fal.ai queue run {run_label} failed{error_suffix}: {error_message}"
+                    )
+                response_url = _queue_operation_url(
+                    status_data.get("response_url"),
+                    response_url,
+                )
+                break
+            if status in {"FAILED", "CANCELLED", "CANCELED"}:
+                error_message = _safe_error_detail(status_data.get("error")) or "Unknown queue error"
+                raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
+            if status not in {"IN_QUEUE", "IN_PROGRESS"}:
+                raise ValueError(
+                    f"fal.ai queue run {run_label} returned unknown status: {status!r}"
+                )
 
-        if result_response.status_code in {202, 408, 425, 429, 500, 502, 503, 504}:
-            time.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
-            continue
+            await asyncio.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
 
-        result = _response_json(result_response, "fal.ai queue result")
-        if result.get("error") and not result.get("images"):
-            error_message = _safe_error_detail(result["error"])
-            raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
-        print(f"NanoSeed: completed async run {run_label} ({request_id}).")
-        return result
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"fal.ai result retrieval timed out for run {run_label} "
+                    f"(request_id: {request_id})."
+                )
+
+            try:
+                result_response = await asyncio.to_thread(
+                    requests.get,
+                    response_url,
+                    headers=headers,
+                    timeout=FAL_HTTP_TIMEOUT_SECONDS,
+                )
+            except requests.RequestException:
+                await asyncio.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+                continue
+
+            if result_response.status_code in {202, 408, 425, 429, 500, 502, 503, 504}:
+                await asyncio.sleep(FAL_QUEUE_POLL_INTERVAL_SECONDS)
+                continue
+
+            result = _response_json(result_response, "fal.ai queue result")
+            if result.get("error") and not result.get("images"):
+                error_message = _safe_error_detail(result["error"])
+                raise ValueError(f"fal.ai queue run {run_label} failed: {error_message}")
+            print(f"NanoSeed: completed async run {run_label} ({request_id}).")
+            return result
+    except asyncio.CancelledError:
+        await asyncio.shield(_cancel_queue_request(cancel_url, headers))
+        raise
 
 
-def _run_fal_queue_requests(run_url, payload, headers, concurrent_runs, queue_timeout):
+async def _run_fal_queue_requests(run_url, payload, headers, concurrent_runs, queue_timeout):
     if not 1 <= concurrent_runs <= FAL_MAX_CONCURRENT_RUNS:
         raise ValueError(
             f"concurrent_runs must be between 1 and {FAL_MAX_CONCURRENT_RUNS}."
@@ -302,14 +326,14 @@ def _run_fal_queue_requests(run_url, payload, headers, concurrent_runs, queue_ti
     if queue_timeout < 1:
         raise ValueError("queue_timeout must be at least 1 second.")
 
-    def run_request(run_index):
+    async def run_request(run_index):
         run_payload = dict(payload)
         run_payload["sync_mode"] = False
         run_headers = dict(headers)
         run_headers["X-Fal-Request-Timeout"] = str(queue_timeout)
         if run_index and isinstance(run_payload.get("seed"), int):
             run_payload["seed"] = (run_payload["seed"] + run_index) % (2**32)
-        return _submit_fal_queue_request(
+        return await _submit_fal_queue_request(
             run_url,
             run_payload,
             run_headers,
@@ -318,22 +342,15 @@ def _run_fal_queue_requests(run_url, payload, headers, concurrent_runs, queue_ti
             concurrent_runs,
         )
 
-    if concurrent_runs == 1:
-        return [run_request(0)]
-
-    ordered_results = [None] * concurrent_runs
-    failures = []
-    with ThreadPoolExecutor(max_workers=concurrent_runs) as executor:
-        future_to_index = {
-            executor.submit(run_request, run_index): run_index
-            for run_index in range(concurrent_runs)
-        }
-        for future in as_completed(future_to_index):
-            run_index = future_to_index[future]
-            try:
-                ordered_results[run_index] = future.result()
-            except Exception as error:
-                failures.append((run_index, error))
+    ordered_results = await asyncio.gather(
+        *(run_request(run_index) for run_index in range(concurrent_runs)),
+        return_exceptions=True,
+    )
+    failures = [
+        (run_index, result)
+        for run_index, result in enumerate(ordered_results)
+        if isinstance(result, Exception)
+    ]
 
     if failures:
         details = "; ".join(
@@ -389,7 +406,7 @@ class NanoSeedEdit:
     CATEGORY = "image/edit"
     OUTPUT_NODE = True
 
-    def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
+    async def edit_image(self, prompt, model, fal_key, image1=None, image2=None, image3=None, image4=None, image5=None,
                    image6=None, image7=None, image8=None, image9=None, image10=None, mask=None,
                    width=0, height=0, num_images=1, num_inference_steps=28, seed=0, aspect_ratio="auto", resolution="1K",
                    quality="high", enable_web_search=False, thinking_level="off", acceleration="none",
@@ -416,28 +433,15 @@ class NanoSeedEdit:
         if not images:
             raise ValueError("At least one image input must be connected.")
         
-        # Convert each to PIL and encode
-        img_data_uris = []
         custom_size = (width > 0 and height > 0)
-        
-        for img_tensor in images:
-            pil_image = tensor2pil(img_tensor)
-            if pil_image is None:
-                continue
-            
-            # Resize if custom size (model-specific behavior)
-            # For Flux and Qwen, we usually send image_size in payload, but resizing here 
-            # ensures consistent aspect ratio calculation before sending if needed.
-            # Nano models ignore this as per original code.
-            if custom_size:
-                if model in ["nano_banana", "nano_banana_pro", "nano_banana_2"]:
-                    pass
-                else:
-                    pil_image = pil_image.resize((width, height), Image.LANCZOS)
-            
-            img_data_uri = pil2data_uri(pil_image)
-            if img_data_uri is not None:
-                img_data_uris.append(img_data_uri)
+        resize_to = None
+        if custom_size and model not in ["nano_banana", "nano_banana_pro", "nano_banana_2"]:
+            resize_to = (width, height)
+        img_data_uris = await asyncio.to_thread(
+            _prepare_image_data_uris,
+            images,
+            resize_to,
+        )
         
         # Enforce limits (Updated: Removed Flux 2 single image limit)
         if model in ["seedream_4.5", "seedream_5", "seedream_5_pro", "seedream_5_lite"] and len(img_data_uris) + num_images > 15:
@@ -495,7 +499,7 @@ class NanoSeedEdit:
             if custom_size:
                 payload["image_size"] = {"width": width, "height": height}
             if mask is not None:
-                mask_data_uri = tensor2data_uri(mask)
+                mask_data_uri = await asyncio.to_thread(tensor2data_uri, mask)
                 if mask_data_uri is not None:
                     payload["mask_url"] = mask_data_uri
         elif model == "grok_imagine_edit":
@@ -600,7 +604,7 @@ class NanoSeedEdit:
             "Authorization": f"Key {fal_key}",
             "Content-Type": "application/json",
         }
-        api_results = _run_fal_queue_requests(
+        api_results = await _run_fal_queue_requests(
             url,
             payload,
             headers,
@@ -629,7 +633,8 @@ class NanoSeedEdit:
                     pil_edited = Image.open(BytesIO(base64.b64decode(encoded)))
                 else:
                     try:
-                        img_resp = requests.get(
+                        img_resp = await asyncio.to_thread(
+                            requests.get,
                             img_data,
                             timeout=FAL_HTTP_TIMEOUT_SECONDS,
                         )

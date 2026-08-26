@@ -9,8 +9,9 @@ A Custom Node that integrates [Fal.ai's](https://fal.ai) powerful image editing 
 * **Multi-Model Support:** Access multiple editing models from a single node.
 * **Multi-Image Input:** Support for up to 10 input images for context-aware editing (model dependent).
 * **Flexible Output:** Control aspect ratios, resolution, and batch size.
-* **Asynchronous Queue:** Every model uses fal.ai's durable queue with status polling and automatic provider-side retries.
-* **Bounded Concurrency:** Submit up to 8 independent runs in parallel while preserving output order.
+* **Concurrent Workflow Nodes:** Independent NanoSeed nodes yield during fal.ai network waits, allowing ComfyUI to execute them at the same time.
+* **Asynchronous Queue:** Every model uses fal.ai's durable queue with non-blocking status polling and automatic provider-side retries.
+* **Per-Node Concurrency:** Submit up to 8 independent runs from one NanoSeed node while preserving output order.
 
 ## 🚀 Supported Models
 
@@ -69,7 +70,7 @@ You must have a **Fal.ai API Key** to use this node.
 * **aspect_ratio**: Set target aspect ratio (e.g., 16:9, 1:1).
 * **enable_web_search**: Enables web search context for supported models.
 * **thinking_level**: `off`, `minimal`, or `high` for supported models.
-* **concurrent_runs**: Number of independent fal.ai queue jobs to submit in parallel. Each run requests its own `num_images`; outputs are returned in run order. Models with an explicit seed increment it for each additional run.
+* **concurrent_runs**: Number of independent fal.ai queue jobs to submit in parallel from this node. This is separate from workflow-level concurrency, which automatically overlaps independent NanoSeed nodes. Each run requests its own `num_images`; outputs are returned in run order. Models with an explicit seed increment it for each additional run.
 * **queue_timeout**: Maximum wait per queue job in seconds. Timed-out jobs receive a best-effort cancellation request.
 
 ### ⚠️ Model Specific Constraints
@@ -113,6 +114,7 @@ Different models have different requirements implemented in the node:
 
 * **Queue failures**: The node reports the failed run number and fal request ID. Check account balance, model access, input validation, and safety filters.
 * **Queue timeout**: Increase `queue_timeout` when fal.ai is busy or when using slower high-resolution models.
+* **Nodes still run in order**: Restart ComfyUI after updating the node. NanoSeed nodes connected by data dependencies must remain sequential; independent branches run concurrently on ComfyUI versions with async-node scheduling.
 * **Resolution Errors**: If using Seedream, ensure your resolution is set high enough (min 1920x1920). If using Flux, ensure it is within 512-2048.
 
 *Star this repo if it helps your workflow! 🚀*
